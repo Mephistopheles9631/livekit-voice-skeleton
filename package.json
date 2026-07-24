@@ -9,9 +9,10 @@
     "dev": "node --watch server/index.js"
   },
   "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "livekit-server-sdk": "^2.9.2",
-    "dotenv": "^16.4.5",
-    "cors": "^2.8.5"
+    "serve": "^14.2.6"
   }
 }
