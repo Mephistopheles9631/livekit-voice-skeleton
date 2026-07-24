@@ -8,6 +8,22 @@ not framework integration. See `PROJECT_SPEC.md` for the full phase-by-phase
 plan and a dated log of what's actually been run and observed, not just what
 the code "should" do.
 
+## Live demo
+
+**https://livekitdemo.app-me.online** — this exact codebase, running right now on the
+author's own box (systemd services `livekit-voice-skeleton.service`/`-agent.service`/
+`-client.service`, real Deepgram/Anthropic/ElevenLabs/LiveKit Cloud accounts, real TLS via
+Let's Encrypt). nginx routes `/session/*` and `/health` to the token server, everything else
+to the static client — the agent process is never exposed publicly, only reachable over the
+localhost-only internal control API (see `CONFIG.md`).
+
+**Verify it's actually live, not a static screenshot**:
+```
+curl https://livekitdemo.app-me.online/health   # -> {"ok":true,"activeSessions":N}
+```
+Or open the URL directly, click "Join Session," grant mic access, and talk — you should see a
+live transcript, a streamed Claude response, and hear it spoken back through ElevenLabs TTS.
+
 ## What's real here
 
 - **Token/orchestration server** (`server/index.js`): issues short-lived
@@ -105,14 +121,38 @@ the one piece that still needs a live human test, same as this project's other a
 
 ## SugarShan POC
 
-`loadtest/` — a client-requested proof-of-concept (see `SCOPE_OF_WORK_sugarshan_poc.md`)
-answering three specific questions with real evidence, not more claims: real load/latency
-numbers under 10-way concurrency (headline: first-turn round-trip p50 4169ms / p95 4500ms /
-p99 4500ms, run against the real live services — see `PROJECT_SPEC.md`'s SugarShan POC section
-for the full numbers, the real ElevenLabs concurrency-cap finding, and two real bugs the load
-test itself surfaced and fixed), a scripted cross-session-memory proof across an actual agent
-process restart (passed cleanly), and an explicitly-labeled GPU-warm-pool simulation. See
-`loadtest/README.md` for how to run each part and its honesty labels.
+`loadtest/` — a client-requested proof-of-concept answering three specific questions with real
+evidence, not more claims. Full dated numbers, the real ElevenLabs concurrency-cap finding, and
+two real bugs the load test itself surfaced and fixed (one in the test harness, one in
+`agent/turnOrchestrator.js` itself, now regression-tested) are logged in `PROJECT_SPEC.md`'s
+SugarShan POC section.
+
+- **Load/latency harness** — N simulated sessions joined headlessly via `@livekit/rtc-node`
+  against the real running services (not mocked), publishing real synthesized speech and
+  timing the round trip:
+  ```
+  npm run loadtest -- --sessions 10 --turns 3
+  npm run loadtest:report -- loadtest/results/<file>.jsonl   # re-analyze a saved run
+  ```
+  Real result: first-turn round-trip (publish → first audible response) p50 4169ms / p95
+  4500ms / p99 4500ms; transcript latency p50 2783ms across 24 completed turns; 6/30 turns
+  failed, mostly a real vendor concurrency cap (ElevenLabs' current plan allows 4 concurrent
+  streams), not a harness bug.
+- **Cross-session memory verification** — scripted two-phase proof around a real agent-process
+  restart, same pattern as the session-persistence proof above:
+  ```
+  node loadtest/verifyMemory.js --phase=a
+  sudo systemctl restart livekit-voice-skeleton-agent.service
+  node loadtest/verifyMemory.js --phase=b
+  ```
+  Passed cleanly on the first live attempt: a stated fact was recalled correctly by a
+  brand-new session after a real service restart.
+- **GPU warm-pool simulation (stretch)** — pure, unit-tested, explicitly mocked, no real
+  vendor involved:
+  ```
+  npm run loadtest:warmpool
+  ```
+  Naive baseline p50 3491ms vs. pre-warmed pool p50 130ms.
 
 ## What's left (Phase 5)
 
@@ -140,9 +180,10 @@ process restart (passed cleanly), and an explicitly-labeled GPU-warm-pool simula
 ## Testing
 
 `npm test` runs the automated suite (Node's built-in test runner, zero
-extra dependencies) — pure orchestration logic (turn state machine,
-barge-in cancellation, token-server routes) tested against fake STT/LLM/TTS
-adapters, no live API keys needed. CI runs this on every push via
+extra dependencies) — **54/54 passing** as of this writing. Pure orchestration logic (turn
+state machine, barge-in cancellation, token-server routes, percentile math, the warm-pool
+simulation's scheduling logic) tested against fake STT/LLM/TTS adapters or injected
+deterministic randomness, no live API keys needed. CI runs this on every push via
 `.github/workflows/test.yml`.
 
 **What automated tests can't prove**: whether the VAD is actually accurate
@@ -150,4 +191,7 @@ against real ambient noise, whether a barge-in sounds clean, whether the
 real vendor SDKs' behavior matches what these tests mock, or real latency
 numbers. Those are the live-verified claims logged with dates in
 `PROJECT_SPEC.md` — CI passing means the orchestration logic is correct
-against documented vendor contracts, not that the voice AI works.
+against documented vendor contracts, not that the voice AI works. The SugarShan POC's load
+test and memory-verification runs (above) are exactly this category: live-only by design,
+run against the real hosted services, with real numbers logged in `PROJECT_SPEC.md` rather
+than asserted in a test file. See `TESTING.md` for the full automated-vs-manual breakdown.

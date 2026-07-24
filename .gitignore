@@ -2,3 +2,5 @@ node_modules/
 .env
 *.log
 loadtest/results/
+SCOPE_OF_WORK_sugarshan_poc.md
+loadtest/README.md
