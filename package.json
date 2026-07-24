@@ -1,0 +1,17 @@
+{
+  "name": "livekit-voice-skeleton",
+  "version": "0.1.0",
+  "description": "Minimal real-time voice pipeline skeleton on LiveKit: token server + browser client that joins a room, publishes mic audio, and subscribes to remote audio. Built as a learning/portfolio scaffold for real-time voice AI work (turn-taking, barge-in, latency profiling to be layered on top).",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "livekit-server-sdk": "^2.9.2",
+    "dotenv": "^16.4.5",
+    "cors": "^2.8.5"
+  }
+}
