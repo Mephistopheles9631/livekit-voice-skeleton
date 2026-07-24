@@ -14,6 +14,7 @@ import express from "express";
 import cors from "cors";
 import { AccessToken } from "livekit-server-sdk";
 import { notifyAgentJoin, notifyAgentLeave } from "./agentClient.js";
+import { createSessionStore } from "./sessionStore.js";
 
 const app = express();
 app.use(cors());
@@ -23,6 +24,7 @@ const {
   LIVEKIT_API_KEY,
   LIVEKIT_API_SECRET,
   LIVEKIT_URL,
+  REDIS_URL,
   PORT = 3001,
 } = process.env;
 
@@ -33,18 +35,16 @@ if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET || !LIVEKIT_URL) {
   );
 }
 
-// In a production orchestration layer, this is where you'd track active
-// sessions (Redis/Postgres), enforce concurrency limits, and decide which
-// "technology" (voice model, avatar renderer, etc.) is active for this
-// session. Kept in-memory here since this is a skeleton, not the product.
-const activeSessions = new Map(); // roomName -> { startedAt, participants: Set }
+// Tracks active sessions — Redis-backed (survives a restart) if REDIS_URL is set, in-memory
+// otherwise. See sessionStore.js.
+const activeSessions = await createSessionStore({ redisUrl: REDIS_URL });
 
 app.post("/session/start", async (req, res) => {
   const { userId } = req.body;
   if (!userId) return res.status(400).json({ error: "userId is required" });
 
   const roomName = `session-${userId}-${Date.now()}`;
-  activeSessions.set(roomName, {
+  await activeSessions.set(roomName, {
     startedAt: Date.now(),
     participants: new Set([userId]),
   });
@@ -78,9 +78,13 @@ app.post("/session/resume", async (req, res) => {
   if (!userId || !roomName) {
     return res.status(400).json({ error: "userId and roomName are required" });
   }
-  if (!activeSessions.has(roomName)) {
+  const session = await activeSessions.get(roomName);
+  if (!session) {
     return res.status(404).json({ error: "session_not_found" });
   }
+  // Re-set on every resume to slide the Redis-backed TTL forward — an actively-resumed
+  // session should never expire out from under a still-connected user. See sessionStore.js.
+  await activeSessions.set(roomName, session);
 
   const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
     identity: userId,
@@ -91,15 +95,15 @@ app.post("/session/resume", async (req, res) => {
   res.json({ roomName, token, url: LIVEKIT_URL });
 });
 
-app.post("/session/stop", (req, res) => {
+app.post("/session/stop", async (req, res) => {
   const { roomName } = req.body;
-  activeSessions.delete(roomName);
+  await activeSessions.delete(roomName);
   notifyAgentLeave(roomName); // fire-and-forget — see agentClient.js
   res.json({ stopped: true });
 });
 
-app.get("/health", (req, res) => {
-  res.json({ ok: true, activeSessions: activeSessions.size });
+app.get("/health", async (req, res) => {
+  res.json({ ok: true, activeSessions: await activeSessions.size() });
 });
 
 app.listen(PORT, () => {

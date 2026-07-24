@@ -25,8 +25,10 @@ real, not claim it without evidence.
 **Phases 0–4 are built and live-confirmed working end-to-end** against a
 real LiveKit Cloud account and real Deepgram/Anthropic/ElevenLabs APIs —
 real speech in, live transcript, streamed Claude response, synthesized
-voice out, and working barge-in. Phase 5 (fallback + persistence + cost)
-is the only remaining phase. See the dated **Phase log** near the bottom
+voice out, and working barge-in. **Phase 5's session-persistence slice is
+also done and live-verified** (Redis-backed sessions survive a service
+restart); fallback vendor + cost tracking are the only remaining pieces.
+See the dated **Phase log** near the bottom
 of this file for exactly what was run and observed at each step, including
 three real bugs hit and fixed along the way (not just a clean success
 story) — silent TTS failure on a free-plan voice restriction, an audio
@@ -107,12 +109,13 @@ on — do not proceed to Phase 1 until this works reliably.
   then under real ambient noise — this number, honestly measured, is the
   single most credible thing to bring to an interview in this domain
 
-### Phase 5 — Only after 0–4 work reliably: orchestration and cost 🚧 Remaining
-- Add a second STT/LLM/TTS vendor and real fallback logic (not just a
+### Phase 5 — Only after 0–4 work reliably: orchestration and cost 🚧 Partially done
+- ✅ **Done**: persist session state (Redis) instead of in-memory, so a
+  session can survive a server restart — `server/sessionStore.js`,
+  live-verified (see Phase log below)
+- 🚧 Add a second STT/LLM/TTS vendor and real fallback logic (not just a
   config flag — actually detect vendor failure/latency and switch)
-- Track and log cost-per-session-minute across vendors
-- Persist session state (Postgres/Redis) instead of in-memory, so a
-  session can survive a server restart
+- 🚧 Track and log cost-per-session-minute across vendors
 
 ## Explicit non-goals (for now)
 - Wake-word / always-on listening — a separate, later skill area
@@ -328,3 +331,33 @@ just the final code.
   pooling, which made an early version of this test flaky).
   31/31 tests passing. Re-verified real join + publish against the live
   LiveKit account, 0 restarts. **Not yet re-confirmed by ear.**
+
+- 2026-07-24: **Phase 5, session-persistence slice built and live-verified**
+  (fallback vendor + cost tracking still not started — separate, not
+  requested yet). `server/sessionStore.js`: `createInMemoryStore()` (the
+  old `Map` behavior, now async) and `createRedisStore()` (real Redis
+  client, namespaced keys `livekit-voice-skeleton:session:{roomName}`,
+  6-hour sliding TTL refreshed on every `/session/resume` so idle-but-
+  connected sessions never expire while genuinely abandoned ones
+  self-clean). `createSessionStore()` picks between them based on whether
+  `REDIS_URL` is set — and if it *is* set but Redis can't be reached at
+  boot, the server crashes on startup rather than silently falling back to
+  in-memory, since a set `REDIS_URL` is an explicit persistence request,
+  not an optional nicety. Installed `redis-server` on this box for real
+  (`sudo apt install redis-server`, ships and auto-enables its own systemd
+  unit) and added `After=redis-server.service` to
+  `livekit-voice-skeleton.service`. 36/36 tests passing
+  (`server/sessionStore.test.js` covers the in-memory contract; the Redis
+  path is intentionally not unit-tested — see reasoning below).
+  **Live-verified the actual claim, not just the code**: started a real
+  session against the running service, confirmed its key existed in Redis
+  with the correct TTL, ran `sudo systemctl restart livekit-voice-skeleton`
+  (0 restarts, clean boot, `[sessionStore] Connected to Redis` logged),
+  then called `/session/resume` with the same `roomName` — **200, not
+  404**. Also confirmed `/session/stop` deletes the Redis key (verified
+  with `redis-cli exists` → 0) rather than leaking it. Scope note: this
+  only covers the token server's session bookkeeping — the separate
+  `agent` process's live pipeline state (open Deepgram/ElevenLabs
+  connections, the `@livekit/rtc-node` `Room`) can't be meaningfully
+  persisted across a process restart and wasn't attempted; the agent just
+  rejoins fresh, which is the existing (unchanged) behavior.

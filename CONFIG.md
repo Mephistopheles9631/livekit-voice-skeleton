@@ -69,16 +69,31 @@ ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL
 ELEVENLABS_MODEL=eleven_flash_v2_5
 ```
 
-## Phase 5 — fallback vendor + session persistence
+## Phase 5 — session persistence (done) + fallback vendor (not yet built)
 
-OpenAI is the fallback vendor for STT and TTS only (not LLM — see above). Get a key from
-https://platform.openai.com. Redis needs `sudo apt install redis-server` on this box (ships
-its own systemd unit, no custom setup needed).
+**Session persistence** (`server/sessionStore.js`): `REDIS_URL` set → sessions (tracked by
+`/session/start|resume|stop`) are stored in Redis and survive a restart of
+`livekit-voice-skeleton.service`; unset → falls back to an in-memory `Map` (fine for local
+dev, but sessions are lost on every restart). This is a meaningful distinction, not just a
+convenience default: if `REDIS_URL` **is** set but Redis can't be reached at boot, the server
+crashes on startup rather than silently degrading to in-memory — the whole point of setting
+`REDIS_URL` is a persistence guarantee, so failing loudly beats pretending it's working.
+Sessions carry a 6-hour sliding TTL (refreshed on every `/session/resume`), so an actively
+used session won't expire out from under a connected user, but a genuinely abandoned one
+self-cleans instead of accumulating in Redis forever.
+
+Install with `sudo apt install redis-server` (ships and auto-enables its own systemd unit —
+verified working on this box). Binds to `127.0.0.1:6379` by default, no auth needed for a
+single-user localhost-only setup.
 
 ```
-OPENAI_API_KEY=
 REDIS_URL=redis://127.0.0.1:6379
 ```
+
+**Fallback vendor** (STT/TTS failover, `agent/pipeline/failover.js`) — **not yet built**.
+OpenAI was considered and dropped; the fallback vendor for STT/TTS is TBD (LLM fallback stays
+Anthropic-only regardless — a cheaper/faster model, since Anthropic has no STT/TTS product).
+No env var needed until a vendor is picked and this is implemented.
 
 ## Tuning / manual overrides
 

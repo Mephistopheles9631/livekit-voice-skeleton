@@ -71,12 +71,23 @@ real bugs hit and fixed along the way (not just a clean success story):
   and a regression test that encodes the exact bug and fix
   (`agent/audio/audioFrameSerialization.test.js`).
 
+**Session persistence** (`server/sessionStore.js`): the token server's session bookkeeping
+(what `/session/start|resume|stop` tracks) is Redis-backed when `REDIS_URL` is set, so a
+session survives a restart of `livekit-voice-skeleton.service` — falls back to in-memory
+(lost on restart) if `REDIS_URL` is unset, which is a deliberate default for zero-setup local
+dev, not an oversight. Live-verified: started a real session, captured its `roomName`,
+restarted the systemd service, and called `/session/resume` with the same `roomName` —
+`200`, not `404`. Sessions carry a 6-hour sliding TTL (refreshed on every resume) so
+abandoned ones self-clean in Redis rather than accumulating forever. Note the scope: this
+covers the token server's bookkeeping only — the separate `agent` process's live pipeline
+state (open STT/TTS connections, the LiveKit `Room` object) can't meaningfully survive a
+process restart and isn't attempted here; the agent just rejoins fresh.
+
 ## What's left (Phase 5)
 
 - Fallback vendor(s) for STT/TTS with real failure detection (not a config
   flag) — vendor TBD, OpenAI was considered and dropped
 - A second, cheaper/faster Claude model as the LLM-side fallback
-- Redis-backed session persistence (currently in-memory, lost on restart)
 - Cost-per-session-minute tracking
 
 ## Running it
