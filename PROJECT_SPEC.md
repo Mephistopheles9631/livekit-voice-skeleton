@@ -443,5 +443,8 @@ just the final code.
   fix that doesn't require real auth (an explicit non-goal for this
   learning skeleton). Old stray memory keys from the three fake
   identities were left in place rather than deleted — they self-expire
-  via the existing 180-day TTL, no cleanup needed. Not yet re-confirmed
-  live by the user with the fix in place.
+  via the existing 180-day TTL, no cleanup needed. **User confirmed
+  live, with the fix in place**: "it recalls stuff i tell it" —
+  cross-session conversational memory is now fully verified end-to-end,
+  including the real voice-to-voice loop this project's honesty
+  checkpoint requires before calling a phase done.
