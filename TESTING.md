@@ -29,7 +29,9 @@ pipeline's many-small-chunk streaming pattern.
 ## Must stay manual (a human, live, per PROJECT_SPEC.md's honesty checkpoint)
 
 - Whether the VAD is actually accurate against real ambient noise (false-positive/negative
-  rate) — Phase 1's stated exit criteria, never something a unit test can measure.
+  rate) — Phase 1's stated exit criteria, never something a unit test can measure. **Verified
+  live by the user (2026-07-24)**: with real background/non-speech noise present, Silero VAD
+  correctly does not fire — see `PROJECT_SPEC.md`'s Phase 1 log.
 - Whether a barge-in interrupt actually *sounds* clean, not just whether the state machine
   transitioned correctly.
 - Whether the real vendor SDKs behave the way the fakes/mocks in the tests above assume —

@@ -152,6 +152,13 @@ just the final code.
   threshold placeholder. **Live-verified by the user**: VAD indicator lit
   green on real speech. Full ambient-noise/false-positive-rate testing not
   yet explicitly done — informal confirmation only so far.
+- 2026-07-24: **Phase 1's ambient-noise exit criteria explicitly tested and
+  confirmed by the user**, closing out the "informal confirmation only"
+  caveat above: with real background/non-speech noise present, Silero VAD
+  correctly does not fire — it distinguishes real speech from ambient
+  noise rather than triggering on any sound, the actual false-positive
+  behavior this phase's exit criteria called for testing, not just a
+  quiet-room happy path.
 - 2026-07-24: Phase 2 (STT) built — new `agent/` service
   (`livekit-voice-skeleton-agent.service`, port 3012 internal control API)
   joins the LiveKit room as a bot participant, subscribes to human audio via
