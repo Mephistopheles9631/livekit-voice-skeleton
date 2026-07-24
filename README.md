@@ -2,57 +2,110 @@
 
 A learning/portfolio scaffold for real-time voice AI work — the kind of
 foundation needed before tackling a role like "real-time voice orchestration
-engineer." This is intentionally a skeleton: it demonstrates the real
-mechanics (token auth, room join, audio publish/subscribe, basic VAD) but
-does NOT yet implement the hard parts of a production system.
+engineer." Hand-rolled deliberately (not built on LiveKit's own Agents
+framework) — the point is demonstrable from-scratch engineering experience,
+not framework integration. See `PROJECT_SPEC.md` for the full phase-by-phase
+plan and a dated log of what's actually been run and observed, not just what
+the code "should" do.
 
 ## What's real here
 
 - **Token/orchestration server** (`server/index.js`): issues short-lived
-  LiveKit access tokens, tracks session start/resume/stop against an
-  in-memory session map. This is the real shape of a "session lifecycle"
-  backend, just without persistence.
-- **Client** (`client/`): actually connects to a LiveKit room over WebRTC,
-  publishes the browser's real microphone track, subscribes to and plays
-  remote audio, and runs a simple amplitude-based voice-activity detector.
+  LiveKit access tokens, tracks session start/resume/stop, notifies the
+  agent process when a session starts/stops.
+- **Client** (`client/`): connects to a LiveKit room over WebRTC, publishes
+  the browser's real mic track, subscribes to and plays remote audio
+  (including the agent's synthesized voice), runs real Silero VAD
+  (`@ricky0123/vad-web`), and renders a live transcript + streamed assistant
+  response panel.
+- **Agent** (`agent/`): a separate service that joins each room as a bot
+  participant and runs the actual voice AI pipeline —
+  - **STT**: streams the human's audio to Deepgram, live interim/final
+    transcripts.
+  - **LLM**: feeds finished utterances to Claude, streaming the response.
+  - **Barge-in**: a new transcript arriving while the agent is thinking or
+    speaking aborts the in-flight LLM/TTS and clears any queued audio —
+    genuinely live-triggerable, not simulated.
+  - **TTS**: streams the LLM's output to ElevenLabs and publishes the
+    synthesized audio back into the room as the bot's own track.
+  - **Latency tracing**: one structured JSON line per turn
+    (`agent/trace/turnTrace.js`) marking speech-start/STT-final/LLM-first-
+    token/LLM-complete/TTS-first-byte/TTS-first-frame — documented
+    explicitly as agent-process boundaries, not literal mic-to-speaker
+    timestamps.
 
-## What's intentionally NOT implemented (the actual hard problems)
+All of Phases 0–4 have been verified against the real LiveKit Cloud account
+and real vendor APIs (Deepgram, Anthropic, ElevenLabs) — see the dated log
+in `PROJECT_SPEC.md` for exactly what was observed, including a couple of
+real bugs hit and fixed along the way (not just a clean success story):
 
-- **Turn-taking / barge-in**: the VAD here just lights up an indicator. A
-  real system needs this signal wired into an LLM harness that can
-  interrupt its own response mid-sentence when the user starts talking.
-- **Sub-1.5s latency profiling**: no latency instrumentation yet. Real work
-  would mean measuring mic-to-model-to-speaker round trip and optimizing
-  each hop (STT, LLM inference, TTS, network).
-- **Multi-vendor orchestration / fallback**: this only talks to LiveKit.
-  A production system would route between multiple STT/LLM/TTS vendors
-  with graceful degradation.
-- **Wake-word detection**: not implemented — would need a dedicated
-  always-on model (e.g. Porcupine) running client-side.
-- **Persistent memory across sessions**: sessions are in-memory and
-  disappear on server restart.
+- **ElevenLabs free-plan voice restriction**: the streaming API rejects any
+  Voice Library voice on a free plan, and reports that failure as a normal
+  message over an already-open socket rather than a WebSocket error — a
+  real silent-failure bug (`TTS just produced no audio, no error anywhere`)
+  until it was caught and fixed. Must use a **premade** voice from your own
+  account, not the Voice Library — see `CONFIG.md`.
+- **A barge-in race**: a turn's normal-completion handler could fire after
+  a barge-in had already superseded it, double-firing an "end" event to the
+  client — caught while writing tests, fixed with a stream-identity guard.
+- **Audio came out as static**: a real concurrency bug — TTS audio chunks
+  were pushed to the publisher fire-and-forget, but the publisher mutated a
+  shared buffer across `await`ed native calls, so two chunks arriving close
+  together could interleave and scramble playback. Root-caused with actual
+  tools (captured ElevenLabs' raw output and verified it with
+  `ffmpeg`/`ffprobe` first, to rule out a vendor-side problem before
+  suspecting the pipeline), then fixed by extracting the framing logic into
+  a serialized, independently-tested module (`agent/audio/pcmFramer.js`).
+- **Then it played back at ~10x speed**: fixing the static above exposed a
+  second bug underneath it. Ruled out the PCM data (verified clean via
+  `ffmpeg`/`ffprobe` again) and ruled out a pacing issue (`@livekit/rtc-node`'s
+  own bundled tests prove the native layer paces playback internally, so
+  pushing frames without artificial delay is correct, not the bug). Found
+  by reading `AudioFrame`'s actual source: it serializes frame data via
+  `new Uint8Array(this.data.buffer)`, which ignores the array's `byteOffset`
+  entirely — every frame here was a *view* into a shared buffer, so every
+  frame after the first from the same buffer silently resent the first
+  frame's bytes instead of its own. Most of the real audio was being
+  discarded and replaced with repeats, packed into the same declared
+  duration. Fixed with `.slice()` (copies into a fresh buffer at offset 0)
+  and a regression test that encodes the exact bug and fix
+  (`agent/audio/audioFrameSerialization.test.js`).
+
+## What's left (Phase 5)
+
+- Fallback vendor(s) for STT/TTS with real failure detection (not a config
+  flag) — vendor TBD, OpenAI was considered and dropped
+- A second, cheaper/faster Claude model as the LLM-side fallback
+- Redis-backed session persistence (currently in-memory, lost on restart)
+- Cost-per-session-minute tracking
 
 ## Running it
 
-1. Create a free project at https://cloud.livekit.io
-2. Follow `CONFIG.md` to set up your `.env`
+1. Create a free project at https://cloud.livekit.io, and accounts at
+   Deepgram, Anthropic, and ElevenLabs
+2. Follow `CONFIG.md` to set up your `.env` — pay particular attention to
+   the ElevenLabs voice ID note if TTS produces no audio
 3. `npm install`
-4. `npm start` (starts the token server on :3001)
-5. Open `client/index.html` in a browser (serve it via any static server —
-   opening as a bare `file://` will hit CORS issues with the mic permission
-   prompt in some browsers)
-6. Click "Join Session" — grant mic permission — you should see the local
-   VAD indicator light up when you speak, and hear yourself if you open a
-   second tab (it'll show as a remote participant).
+4. Start all three services: `npm start` (token server, :3011),
+   `npm run start:agent` (agent, :3012), and serve `client/` via any static
+   server (e.g. `npx serve client`) — or run them as systemd services (see
+   the unit files this project's server was actually deployed with)
+5. Open the client in a browser, click "Join Session," grant mic
+   permission, and talk — you should see live transcripts, a streamed
+   assistant response, and hear it talk back. Interrupt it mid-response to
+   test barge-in.
 
-## Next steps (in priority order for closing the gap toward production voice AI work)
+## Testing
 
-1. Replace the amplitude VAD with a real model (Silero VAD) and measure
-   false-positive rate in noisy audio
-2. Add STT (e.g. Deepgram/Whisper streaming) and wire transcript output
-   into a visible transcript panel
-3. Add an LLM harness that can be told to stop generating when barge-in
-   is detected
-4. Add TTS output and measure full round-trip latency with real timestamps
-5. Only after 1–4 work reliably: start thinking about multi-vendor fallback
-   and cost-per-minute tracking
+`npm test` runs the automated suite (Node's built-in test runner, zero
+extra dependencies) — pure orchestration logic (turn state machine,
+barge-in cancellation, token-server routes) tested against fake STT/LLM/TTS
+adapters, no live API keys needed. CI runs this on every push via
+`.github/workflows/test.yml`.
+
+**What automated tests can't prove**: whether the VAD is actually accurate
+against real ambient noise, whether a barge-in sounds clean, whether the
+real vendor SDKs' behavior matches what these tests mock, or real latency
+numbers. Those are the live-verified claims logged with dates in
+`PROJECT_SPEC.md` — CI passing means the orchestration logic is correct
+against documented vendor contracts, not that the voice AI works.

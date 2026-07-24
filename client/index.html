@@ -9,6 +9,11 @@
     #status { margin: 16px 0; padding: 10px; background: #f3f3f3; border-radius: 6px; font-family: monospace; white-space: pre-wrap; }
     #vad-indicator { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: #ccc; margin-left: 8px; vertical-align: middle; transition: background 0.1s; }
     #vad-indicator.speaking { background: #2ecc71; }
+    #transcript-panel, #assistant-panel { margin: 16px 0; padding: 10px; background: #fafafa; border: 1px solid #e0e0e0; border-radius: 6px; min-height: 40px; }
+    #transcript-panel .final { margin: 0 0 4px; }
+    #transcript-panel .interim { margin: 0; color: #888; font-style: italic; }
+    #assistant-panel { background: #f0f6ff; border-color: #cfe0f7; white-space: pre-wrap; }
+    #assistant-panel .interrupted::after { content: " [interrupted]"; color: #c0392b; font-style: italic; }
   </style>
 </head>
 <body>
@@ -21,8 +26,16 @@
   <span id="vad-indicator" title="Local mic voice activity"></span>
 
   <div id="status">Not connected.</div>
+  <h3>Live transcript (Phase 2 — Deepgram, via the agent)</h3>
+  <div id="transcript-panel"><p class="interim"></p></div>
+  <h3>Assistant response (Phase 3 — Claude; talk again mid-response to interrupt it)</h3>
+  <div id="assistant-panel"></div>
   <div id="remote-audio-container"></div>
 
+  <!-- @ricky0123/vad-web ships as a UMD bundle (global `window.vad`), not an ES module, so
+       it's loaded via plain <script> tags here rather than imported in client.js/vad.js. -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.wasm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/bundle.min.js"></script>
   <script type="module" src="./client.js"></script>
 </body>
 </html>

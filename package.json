@@ -6,9 +6,15 @@
   "type": "module",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node --watch server/index.js"
+    "start:agent": "node agent/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test '**/*.test.js'"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.114.0",
+    "@deepgram/sdk": "^5.7.0",
+    "@elevenlabs/elevenlabs-js": "^2.59.0",
+    "@livekit/rtc-node": "^0.13.31",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",

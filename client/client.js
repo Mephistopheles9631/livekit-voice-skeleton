@@ -15,23 +15,69 @@ import {
   Track,
   createLocalAudioTrack,
 } from "https://esm.sh/livekit-client@2.9.2";
+import { startVAD } from "./vad.js";
 
 const statusEl = document.getElementById("status");
 const joinBtn = document.getElementById("joinBtn");
 const leaveBtn = document.getElementById("leaveBtn");
 const vadIndicator = document.getElementById("vad-indicator");
 const remoteAudioContainer = document.getElementById("remote-audio-container");
+const transcriptPanel = document.getElementById("transcript-panel");
+const interimEl = transcriptPanel.querySelector(".interim");
+const assistantPanel = document.getElementById("assistant-panel");
 
 const SERVER_URL = "";
 
 let room = null;
 let localAudioTrack = null;
-let audioContext = null;
-let vadRafId = null;
+let vadInstance = null;
 
 function log(msg) {
   statusEl.textContent += `\n${msg}`;
   console.log(msg);
+}
+
+// --- Phase 2: live transcript panel ---
+// Transcripts arrive over LiveKit's own data channel (topic "transcript") from the agent
+// process — see agent/agentSession.js's broadcastTranscript() and
+// agent/pipeline/stt/deepgramAdapter.js's onTranscript payload shape.
+function renderTranscript({ text, isFinal }) {
+  if (isFinal) {
+    const line = document.createElement("p");
+    line.className = "final";
+    line.textContent = text;
+    transcriptPanel.insertBefore(line, interimEl);
+    interimEl.textContent = "";
+  } else {
+    interimEl.textContent = text;
+  }
+}
+
+// --- Phase 3/4: streamed assistant response panel ---
+// Payload shape from agent/agentSession.js's broadcast("assistant", ...): {event: "start"},
+// {event: "delta", text}, {event: "end", interrupted}, {event: "error", message}.
+function renderAssistantEvent(msg) {
+  if (msg.event === "start") {
+    assistantPanel.textContent = "";
+    assistantPanel.classList.remove("interrupted");
+  } else if (msg.event === "delta") {
+    assistantPanel.textContent += msg.text;
+  } else if (msg.event === "error") {
+    log(`Pipeline error: ${msg.message}`);
+  } else if (msg.event === "end") {
+    assistantPanel.classList.toggle("interrupted", Boolean(msg.interrupted));
+    if (msg.interrupted) log("Assistant response interrupted (barge-in).");
+  }
+}
+
+function handleDataReceived(payload, _participant, _kind, topic) {
+  try {
+    const msg = JSON.parse(new TextDecoder().decode(payload));
+    if (topic === "transcript") renderTranscript(msg);
+    else if (topic === "assistant") renderAssistantEvent(msg);
+  } catch (e) {
+    log(`Failed to parse data-channel payload (topic=${topic}): ${e.message}`);
+  }
 }
 
 async function fetchToken(userId) {
@@ -47,35 +93,34 @@ async function fetchToken(userId) {
 // --- Voice Activity Detection (VAD) ---
 // A real "turn-taking" system needs to know, moment to moment, whether the
 // user is currently speaking, so the orchestration layer can decide when to
-// let the AI respond vs. wait vs. interrupt. This is a deliberately simple
-// amplitude-threshold VAD — a real implementation would use something like
-// WebRTC's built-in audio level events or a dedicated VAD model
-// (e.g. Silero VAD) for robustness in noisy conditions.
-function startVAD(mediaStreamTrack) {
-  audioContext = new AudioContext();
-  const source = audioContext.createMediaStreamSource(
-    new MediaStream([mediaStreamTrack])
-  );
-  const analyser = audioContext.createAnalyser();
-  analyser.fftSize = 512;
-  source.connect(analyser);
-
-  const data = new Uint8Array(analyser.frequencyBinCount);
-  const SPEAKING_THRESHOLD = 15; // tune against real mic input
-
-  function tick() {
-    analyser.getByteFrequencyData(data);
-    const avg = data.reduce((a, b) => a + b, 0) / data.length;
-    const speaking = avg > SPEAKING_THRESHOLD;
-    vadIndicator.classList.toggle("speaking", speaking);
-    vadRafId = requestAnimationFrame(tick);
-  }
-  tick();
+// let the AI respond vs. wait vs. interrupt. Phase 1: real Silero VAD (see
+// vad.js) replacing the original amplitude-threshold placeholder — this runs
+// its own independent mic capture (via vad-web's default getStream), separate
+// from the LiveKit-published track, rather than sharing a MediaStream, since
+// vad-web's pause()/destroy() stop whatever stream they're given and that
+// would risk killing the LiveKit publish track too.
+async function startLocalVAD() {
+  vadInstance = await startVAD({
+    onSpeechStart: () => {
+      vadIndicator.classList.add("speaking");
+      log("VAD: speech start");
+    },
+    onSpeechEnd: () => {
+      vadIndicator.classList.remove("speaking");
+      log("VAD: speech end");
+    },
+    onMisfire: () => {
+      vadIndicator.classList.remove("speaking");
+      log("VAD: misfire (too short to count as speech)");
+    },
+  });
 }
 
-function stopVAD() {
-  if (vadRafId) cancelAnimationFrame(vadRafId);
-  if (audioContext) audioContext.close();
+async function stopLocalVAD() {
+  if (vadInstance) {
+    await vadInstance.destroy();
+    vadInstance = null;
+  }
   vadIndicator.classList.remove("speaking");
 }
 
@@ -101,6 +146,8 @@ async function join() {
     track.detach().forEach((el) => el.remove());
   });
 
+  room.on(RoomEvent.DataReceived, handleDataReceived);
+
   room.on(RoomEvent.Disconnected, () => {
     log("Disconnected from room.");
     joinBtn.disabled = false;
@@ -114,13 +161,13 @@ async function join() {
   await room.localParticipant.publishTrack(localAudioTrack);
   log("Published local mic audio track.");
 
-  startVAD(localAudioTrack.mediaStreamTrack);
+  await startLocalVAD();
 
   leaveBtn.disabled = false;
 }
 
 async function leave() {
-  stopVAD();
+  await stopLocalVAD();
   if (localAudioTrack) {
     localAudioTrack.stop();
     localAudioTrack = null;
@@ -130,6 +177,10 @@ async function leave() {
     room = null;
   }
   remoteAudioContainer.innerHTML = "";
+  transcriptPanel.querySelectorAll(".final").forEach((el) => el.remove());
+  interimEl.textContent = "";
+  assistantPanel.textContent = "";
+  assistantPanel.classList.remove("interrupted");
   joinBtn.disabled = false;
   leaveBtn.disabled = true;
 }

@@ -13,6 +13,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { AccessToken } from "livekit-server-sdk";
+import { notifyAgentJoin, notifyAgentLeave } from "./agentClient.js";
 
 const app = express();
 app.use(cors());
@@ -61,6 +62,7 @@ app.post("/session/start", async (req, res) => {
     });
 
     const token = await at.toJwt();
+    notifyAgentJoin(roomName); // fire-and-forget — see agentClient.js
     res.json({ roomName, token, url: LIVEKIT_URL });
   } catch (err) {
     console.error("Failed to issue token:", err);
@@ -92,6 +94,7 @@ app.post("/session/resume", async (req, res) => {
 app.post("/session/stop", (req, res) => {
   const { roomName } = req.body;
   activeSessions.delete(roomName);
+  notifyAgentLeave(roomName); // fire-and-forget — see agentClient.js
   res.json({ stopped: true });
 });
 

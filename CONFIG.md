@@ -1,13 +1,97 @@
 # Configuration
 
-Create a local `.env` file (not committed) with these variables. Get the LiveKit values
-from a free project at https://cloud.livekit.io — the free tier is enough for this skeleton.
+Create a local `.env` file (not committed, gitignored) with these variables.
+
+## Phase 0 — LiveKit (required to run anything)
+
+Get these from a free project at https://cloud.livekit.io.
 
 ```
 LIVEKIT_URL=wss://your-project.livekit.cloud
 LIVEKIT_API_KEY=your-api-key
 LIVEKIT_API_SECRET=your-api-secret
-PORT=3001
+PORT=3011
+```
+
+## Agent internal control channel
+
+The token server (`server/index.js`) notifies the agent process (`agent/index.js`) over a
+localhost-only HTTP call when a session starts/stops — never proxied by nginx, never leaves
+the box. `AGENT_INTERNAL_SECRET` can be any random string; generate one with
+`openssl rand -hex 32`.
+
+```
+AGENT_PORT=3012
+AGENT_INTERNAL_URL=http://127.0.0.1:3012
+AGENT_INTERNAL_SECRET=<random>
+```
+
+## Phase 2 — Deepgram (streaming STT)
+
+Get an API key from https://console.deepgram.com.
+
+```
+DEEPGRAM_API_KEY=
+DEEPGRAM_MODEL=nova-3
+```
+
+## Phase 3 — Anthropic Claude (LLM)
+
+Get an API key from https://console.anthropic.com. Used for both the primary and fallback
+model — the LLM leg intentionally has no second *vendor*, just a cheaper/faster fallback
+model (see `PROJECT_SPEC.md` Phase 5 for why).
+
+```
+ANTHROPIC_API_KEY=
+CLAUDE_MODEL=claude-sonnet-5
+CLAUDE_FALLBACK_MODEL=claude-haiku-4-5-20251001
+```
+
+## Phase 4 — ElevenLabs (streaming TTS)
+
+Get an API key from https://elevenlabs.io.
+
+**Free-plan voice restriction (hit this for real, see PROJECT_SPEC.md Phase 4 log):**
+ElevenLabs' streaming-input API rejects any voice from the shared **Voice Library** on a free
+plan — "Free users cannot use library voices via the API. Please upgrade your subscription to
+use this voice." `ELEVENLABS_VOICE_ID` must be a **premade** voice already in your own
+account's "My Voices" (check `GET /v1/voices` with your key, or the ElevenLabs dashboard —
+look for `category: "premade"`, not a voice you searched for in the Voice Library). The
+default below (`EXAVITQu4vr4xnSDxMaL`, "Sarah") is one of ElevenLabs' standard premade voices
+and works on a free plan. Also note: an API key can be scoped without `voices_read`
+permission, in which case `GET /v1/voices` itself will 401 even though streaming TTS still
+works — check your key's permissions in the ElevenLabs dashboard if you need to look up
+voices yourself.
+
+```
+ELEVENLABS_API_KEY=
+ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL
+ELEVENLABS_MODEL=eleven_flash_v2_5
+```
+
+## Phase 5 — fallback vendor + session persistence
+
+OpenAI is the fallback vendor for STT and TTS only (not LLM — see above). Get a key from
+https://platform.openai.com. Redis needs `sudo apt install redis-server` on this box (ships
+its own systemd unit, no custom setup needed).
+
+```
+OPENAI_API_KEY=
+REDIS_URL=redis://127.0.0.1:6379
+```
+
+## Tuning / manual overrides
+
+`BARGE_IN_LEVEL_THRESHOLD` tunes how sensitive server-side barge-in detection is (RMS scale,
+roughly 0-1; higher = requires louder speech to interrupt). The `FORCE_FALLBACK_*` vars let
+you manually force a pipeline stage onto its fallback vendor to demonstrate failover on
+command, without waiting for a real vendor outage — set to any non-empty value to force.
+
+```
+BARGE_IN_LEVEL_THRESHOLD=0.02
+FORCE_FALLBACK_STT=
+FORCE_FALLBACK_LLM=
+FORCE_FALLBACK_TTS=
 ```
 
 Never commit the real `.env` — it's gitignored.
