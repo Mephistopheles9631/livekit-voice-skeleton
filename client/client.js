@@ -32,6 +32,23 @@ let room = null;
 let localAudioTrack = null;
 let vadInstance = null;
 
+// Persisted per-browser identity. Until Phase 5's conversational memory (agent/memory/),
+// userId only ever needed to be unique enough to name a LiveKit room — a fresh random one
+// per join was fine. Memory gave userId a second job (the key the agent recalls facts
+// under), which a fresh-every-time random ID silently defeats: every session looks like a
+// different person, so nothing is ever recalled. localStorage is the simplest fix that
+// doesn't require real auth — fine for this learning skeleton (see PROJECT_SPEC.md's
+// explicit non-goals), not fine for a real product with real accounts.
+function getOrCreateUserId() {
+  const KEY = "livekit-voice-skeleton:userId";
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id = `user-${Math.floor(Math.random() * 100000)}`;
+    localStorage.setItem(KEY, id);
+  }
+  return id;
+}
+
 function log(msg) {
   statusEl.textContent += `\n${msg}`;
   console.log(msg);
@@ -128,7 +145,7 @@ async function join() {
   joinBtn.disabled = true;
   statusEl.textContent = "Requesting token...";
 
-  const userId = `user-${Math.floor(Math.random() * 100000)}`;
+  const userId = getOrCreateUserId();
   const { token, url, roomName } = await fetchToken(userId);
   log(`Got token for room: ${roomName}`);
 

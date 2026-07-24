@@ -419,3 +419,29 @@ just the final code.
   the (unmodified) STT/TTS legs; the full loop still needs the user's
   own live two-session test, same as every other "does it actually sound
   right" claim in this project.
+
+- 2026-07-24: **The user's first live test failed — "it's not remembering
+  my name."** Root-caused from real evidence, not guessed: `journalctl -u
+  livekit-voice-skeleton-agent` showed three sessions in the same test
+  window with three completely different `userId`s
+  (`user-93960`, `user-98164`, `user-22404`), and `redis-cli` confirmed
+  three separate memory records, one per fake "user." The actual bug:
+  `client/client.js` generated a fresh random `userId` on every
+  `join()` call (`user-${Math.random()...}`) — this was harmless when
+  `userId` only had to be unique enough to name a LiveKit room, but
+  Phase 5's memory feature gave `userId` a second job (the key facts are
+  recalled under) that a fresh-every-session random ID silently defeats:
+  every session looks like a different person, so nothing is ever
+  recalled, by design of the very feature meant to prevent that. Also
+  visible directly in the stored data: session `user-98164`'s extracted
+  facts included "User started to share their name but the transcript
+  cuts off before completing it" — real evidence the pipeline was
+  working as designed on the data it was given, just never getting the
+  same identity twice. **Fixed**: `getOrCreateUserId()` in
+  `client/client.js` now persists the ID in `localStorage`, generated
+  once per browser and reused on every subsequent join — the simplest
+  fix that doesn't require real auth (an explicit non-goal for this
+  learning skeleton). Old stray memory keys from the three fake
+  identities were left in place rather than deleted — they self-expire
+  via the existing 180-day TTL, no cleanup needed. Not yet re-confirmed
+  live by the user with the fix in place.
