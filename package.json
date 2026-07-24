@@ -8,7 +8,12 @@
     "start": "node server/index.js",
     "start:agent": "node agent/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node --test '**/*.test.js'"
+    "test": "node --test '**/*.test.js'",
+    "loadtest": "node loadtest/runLoadTest.js",
+    "loadtest:report": "node loadtest/report.js",
+    "loadtest:memory": "node loadtest/verifyMemory.js",
+    "loadtest:warmpool": "node loadtest/warmPoolSim.js",
+    "loadtest:prep-audio": "node loadtest/prepareSampleAudio.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.114.0",

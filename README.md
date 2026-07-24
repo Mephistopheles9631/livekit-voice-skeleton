@@ -103,6 +103,17 @@ exactly, and a correction in a later session replaced rather than duplicated the
 the full voice-to-voice loop (say a fact, end the call, start a new one, hear it recalled) is
 the one piece that still needs a live human test, same as this project's other audio claims.
 
+## SugarShan POC
+
+`loadtest/` — a client-requested proof-of-concept (see `SCOPE_OF_WORK_sugarshan_poc.md`)
+answering three specific questions with real evidence, not more claims: real load/latency
+numbers under 10-way concurrency (headline: first-turn round-trip p50 4169ms / p95 4500ms /
+p99 4500ms, run against the real live services — see `PROJECT_SPEC.md`'s SugarShan POC section
+for the full numbers, the real ElevenLabs concurrency-cap finding, and two real bugs the load
+test itself surfaced and fixed), a scripted cross-session-memory proof across an actual agent
+process restart (passed cleanly), and an explicitly-labeled GPU-warm-pool simulation. See
+`loadtest/README.md` for how to run each part and its honesty labels.
+
 ## What's left (Phase 5)
 
 - Fallback vendor(s) for STT/TTS with real failure detection (not a config

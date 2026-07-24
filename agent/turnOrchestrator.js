@@ -89,7 +89,18 @@ export function createTurnOrchestrator({
       onDone: () => {
         audioPublisher.flushPending().catch(onError);
       },
-      onError,
+      // Guarded the same way the barge-in supersession check in .finally() below guards
+      // completion side effects: a turn's ElevenLabs connection is never explicitly closed on
+      // normal completion (nothing here proactively ends it — see PROJECT_SPEC.md's SugarShan
+      // POC log), so it can still be open, dangling, when ElevenLabs' own ~20s idle timeout
+      // eventually force-closes it and reports that as an error. Without this guard, that
+      // late, stale error fires unconditionally via the raw onError below — a real, load-
+      // test-surfaced bug, not hypothetical: under concurrent load it reliably injected a
+      // bogus "assistant" {event:"error"} into whatever *later* turn happened to be active at
+      // the time, misattributing an old, already-finished turn's cleanup noise to a live one.
+      onError: (err) => {
+        if (activeTTS === myTTS) onError(err);
+      },
     });
     activeTTS = myTTS;
 

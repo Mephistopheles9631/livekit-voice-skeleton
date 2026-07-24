@@ -42,13 +42,14 @@ function createFakeTTS() {
   const connections = [];
   return {
     connections,
-    connect({ onAudioChunk, onDone }) {
+    connect({ onAudioChunk, onDone, onError }) {
       const conn = {
         stopped: false,
         sentText: [],
         flushed: false,
         emitAudio: (buf) => onAudioChunk(buf),
         emitDone: () => onDone(),
+        emitError: (err) => onError(err),
         sendText(t) {
           conn.sentText.push(t);
         },
@@ -103,6 +104,7 @@ function setup(initialState = STATES.LISTENING, { getSystem } = {}) {
   const tts = createFakeTTS();
   const audioPublisher = createFakeAudioPublisher();
   const broadcast = createRecordingBroadcast();
+  const errors = [];
   const orchestrator = createTurnOrchestrator({
     turnState,
     llm,
@@ -110,9 +112,10 @@ function setup(initialState = STATES.LISTENING, { getSystem } = {}) {
     audioPublisher,
     broadcast,
     roomName: "test-room",
+    onError: (err) => errors.push(err),
     ...(getSystem ? { getSystem } : {}),
   });
-  return { turnState, llm, tts, audioPublisher, broadcast, orchestrator };
+  return { turnState, llm, tts, audioPublisher, broadcast, orchestrator, errors };
 }
 
 test("a final speechFinal transcript while LISTENING starts a turn: LLM tokens forward to TTS, state ends back at LISTENING", async () => {
@@ -299,6 +302,32 @@ test("a barge-in'd turn contributes nothing to history", async () => {
   await first;
 
   assert.deepEqual(orchestrator.getHistory(), [], "an aborted turn must not be remembered");
+});
+
+test("a stale TTS connection's late error, after its turn already completed, is not reported", async () => {
+  // Regression test for a real bug found via SugarShan POC load testing (see
+  // PROJECT_SPEC.md's SugarShan POC log): a turn's ElevenLabs connection is never explicitly
+  // closed on normal completion, so it can still be open when the vendor's own idle timeout
+  // eventually force-closes it and reports that as an error — this must not be misattributed
+  // to whatever turn happens to be active by the time that late error arrives.
+  const { llm, tts, errors, orchestrator } = setup();
+
+  const first = orchestrator.handleTranscript({ text: "turn one", isFinal: true, speechFinal: true });
+  llm.streams[0].resolve();
+  await first;
+  const staleConnection = tts.connections[0];
+
+  const second = orchestrator.handleTranscript({ text: "turn two", isFinal: true, speechFinal: true });
+  assert.equal(tts.connections.length, 2, "a fresh TTS connection is opened for the new turn");
+
+  staleConnection.emitError(new Error("ElevenLabs error (1008): idle timeout"));
+  assert.deepEqual(errors, [], "a late error from an already-superseded turn's connection must not be reported");
+
+  tts.connections[1].emitError(new Error("a real, currently-relevant TTS error"));
+  assert.equal(errors.length, 1, "an error from the CURRENTLY active turn's connection must still be reported");
+
+  llm.streams[1].resolve();
+  await second;
 });
 
 test("getSystem() is called fresh per turn, not snapshotted once at construction", async () => {

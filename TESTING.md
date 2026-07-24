@@ -23,6 +23,8 @@ pipeline's many-small-chunk streaming pattern.
 | User memory store contract | `agent/memory/userMemoryStore.test.js` | `createInMemoryStore()`'s get/set behave correctly. Doesn't touch `createRedisStore()` or the actual extraction/summarization call — those are proven live instead (see below). |
 | PCM re-framing/serialization | `agent/audio/pcmFramer.test.js`, `agent/audio/audioFrameSerialization.test.js` | Frames slice and reassemble byte-for-byte correctly; concurrent fire-and-forget pushes never re-enter the frame sink out of order (the real cause of an audible static bug); a raw TypedArray *view* into a shared buffer serializes the wrong bytes when handed to the native SDK, while `.slice()` doesn't (the real cause of a 10x-speed-playback bug). |
 | Latency trace math | `agent/trace/turnTrace.test.js` | Delta computation from marks is correct; emits exactly one JSON line per finished trace. |
+| Load-test percentile math | `loadtest/report.test.js` | `computeStats()`'s nearest-rank p50/p95/p99/min/max are correct, including empty/single-value/unsorted-input edge cases. Doesn't touch the actual live-load-generation code (`simulateSession.js`, `runLoadTest.js`) — that's vendor/LiveKit-touching and proven live instead, same as `claudeAdapter.js`/`deepgramAdapter.js`/`elevenLabsAdapter.js`. |
+| GPU warm-pool simulation logic | `loadtest/warmPoolSim.test.js` | Against an injected deterministic random source: a pre-warmed slot gives a warm start; no pre-warmed slot cold-starts; pool exhaustion correctly queues and charges wait time; a slot freed within its grace period is reused warm, one reused after the grace period expires cold-starts. Pure logic, zero vendor dependency, so — unlike the rest of `loadtest/` — this *is* unit-tested, same category as `turnState.js`/`pcmFramer.js`. |
 
 ## Must stay manual (a human, live, per PROJECT_SPEC.md's honesty checkpoint)
 
@@ -54,3 +56,9 @@ pipeline's many-small-chunk streaming pattern.
   human speaking a fact aloud, ending the call, starting a new one, and hearing it recalled
   through real STT/TTS. That needs a live human test, same as every other audio-quality claim
   here.
+- SugarShan POC Part 1's real load numbers (`loadtest/runLoadTest.js` against the live
+  services) and Part 2's cross-session memory proof across a real agent-process restart
+  (`loadtest/verifyMemory.js`) — both vendor/LiveKit/Redis-touching and live-only by design,
+  same reasoning as the rest of this section. Real, dated results in `PROJECT_SPEC.md`'s
+  SugarShan POC section; see `loadtest/README.md` for exactly what each script measures and
+  its honesty labels/known limitations.
