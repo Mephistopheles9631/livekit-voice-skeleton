@@ -23,12 +23,17 @@ export function createTurnOrchestrator({
   audioPublisher,
   broadcast,
   roomName,
+  getSystem = () => undefined,
   onError = () => {},
 }) {
   let utteranceBuffer = "";
   let activeStream = null; // in-flight Claude MessageStream
   let activeTTS = null; // in-flight ElevenLabs connection handle
   let activeTrace = null;
+  // Only turns that actually complete (not barge-in'd) are committed here — see runTurn().
+  // An interrupted turn contributes nothing; the user's next utterance stands alone, matching
+  // how a person naturally restarts a thought after interrupting themselves.
+  let conversationHistory = [];
 
   // Deepgram's own speech-start detection (vad_events) — the closest available
   // approximation of "mic input arrived" (see turnTrace.js's honesty note: this is not a
@@ -89,13 +94,16 @@ export function createTurnOrchestrator({
     activeTTS = myTTS;
 
     let firstTokenSeen = false;
+    let assistantText = "";
     const myStream = llm.generate({
-      messages: [{ role: "user", content: userText }],
+      messages: [...conversationHistory, { role: "user", content: userText }],
+      system: getSystem(),
       onToken: (delta) => {
         if (!firstTokenSeen) {
           firstTokenSeen = true;
           trace.mark("llm_first_token");
         }
+        assistantText += delta;
         broadcast("assistant", { event: "delta", text: delta });
         myTTS.sendText(delta);
       },
@@ -120,6 +128,11 @@ export function createTurnOrchestrator({
         activeStream = null;
         activeTTS = null;
         activeTrace = null;
+        conversationHistory = [
+          ...conversationHistory,
+          { role: "user", content: userText },
+          { role: "assistant", content: assistantText },
+        ];
         if (turnState.get() === STATES.THINKING || turnState.get() === STATES.SPEAKING) {
           turnState.transition(STATES.LISTENING);
         }
@@ -150,5 +163,5 @@ export function createTurnOrchestrator({
     activeTTS?.stop();
   }
 
-  return { handleTranscript, handleSpeechStarted, abortActive };
+  return { handleTranscript, handleSpeechStarted, abortActive, getHistory: () => conversationHistory };
 }

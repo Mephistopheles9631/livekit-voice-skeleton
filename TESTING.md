@@ -19,7 +19,8 @@ pipeline's many-small-chunk streaming pattern.
 | Token server routes | `server/index.test.js` | `/session/start\|resume\|stop\|health` behave correctly. `AccessToken.toJwt()` signs locally with no network call, so this needs no real LiveKit account. Spawned with `REDIS_URL` unset, so this also exercises the in-memory session store path. |
 | Session store contract | `server/sessionStore.test.js` | `createInMemoryStore()`'s get/set/has/delete/size behave correctly. Doesn't touch `createRedisStore()` — real Redis persistence is proven live instead (see below), not mocked. |
 | Turn state machine | `agent/state/turnState.test.js` | Only the declared transitions are allowed; invalid ones throw and leave state unchanged. |
-| Turn orchestration + barge-in | `agent/turnOrchestrator.test.js` | Against fake STT/LLM/TTS adapters: a finished utterance starts a turn; interim transcripts don't; a new transcript during THINKING or SPEAKING aborts the LLM stream, stops TTS, clears queued audio, and returns to LISTENING — and does *not* double-fire completion events for a turn that was already superseded (a real bug, caught by this exact test). |
+| Turn orchestration + barge-in | `agent/turnOrchestrator.test.js` | Against fake STT/LLM/TTS adapters: a finished utterance starts a turn; interim transcripts don't; a new transcript during THINKING or SPEAKING aborts the LLM stream, stops TTS, clears queued audio, and returns to LISTENING — and does *not* double-fire completion events for a turn that was already superseded (a real bug, caught by this exact test). Also: a second completed turn's outgoing `messages` includes the first turn's user+assistant pair (in-session memory); a barge-in'd turn contributes nothing to history; `getSystem()` is called fresh per turn, not snapshotted once. |
+| User memory store contract | `agent/memory/userMemoryStore.test.js` | `createInMemoryStore()`'s get/set behave correctly. Doesn't touch `createRedisStore()` or the actual extraction/summarization call — those are proven live instead (see below). |
 | PCM re-framing/serialization | `agent/audio/pcmFramer.test.js`, `agent/audio/audioFrameSerialization.test.js` | Frames slice and reassemble byte-for-byte correctly; concurrent fire-and-forget pushes never re-enter the frame sink out of order (the real cause of an audible static bug); a raw TypedArray *view* into a shared buffer serializes the wrong bytes when handed to the native SDK, while `.slice()` doesn't (the real cause of a 10x-speed-playback bug). |
 | Latency trace math | `agent/trace/turnTrace.test.js` | Delta computation from marks is correct; emits exactly one JSON line per finished trace. |
 
@@ -42,3 +43,14 @@ pipeline's many-small-chunk streaming pattern.
   returned `200` for the same `roomName` (not `404`). A unit test against
   `createInMemoryStore()` can't prove this; it would need to fake the exact thing (a real
   process restart against a real Redis) that makes the claim worth making.
+- Cross-session conversational memory — verified against the real Anthropic API and real
+  Redis (not mocked): a simulated session's stated facts were extracted with no fabrication,
+  a separate process loading only the stored summary correctly answered a recall question,
+  and a corrective follow-up session replaced the old facts rather than duplicating a
+  contradiction. This caught a real bug (the extraction prompt letting Claude continue the
+  transcript instead of summarizing it — see `PROJECT_SPEC.md`'s Phase log) that a mocked
+  test would never have surfaced, since it depended on the real model's actual behavior, not
+  an assumed contract. **Still not covered even by that**: the full voice-to-voice loop — a
+  human speaking a fact aloud, ending the call, starting a new one, and hearing it recalled
+  through real STT/TTS. That needs a live human test, same as every other audio-quality claim
+  here.

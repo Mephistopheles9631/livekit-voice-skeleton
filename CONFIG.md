@@ -69,7 +69,7 @@ ELEVENLABS_VOICE_ID=EXAVITQu4vr4xnSDxMaL
 ELEVENLABS_MODEL=eleven_flash_v2_5
 ```
 
-## Phase 5 — session persistence (done) + fallback vendor (not yet built)
+## Phase 5 — session persistence + conversational memory (done) + fallback vendor (not yet built)
 
 **Session persistence** (`server/sessionStore.js`): `REDIS_URL` set → sessions (tracked by
 `/session/start|resume|stop`) are stored in Redis and survive a restart of
@@ -89,6 +89,13 @@ single-user localhost-only setup.
 ```
 REDIS_URL=redis://127.0.0.1:6379
 ```
+
+**Conversational memory** (`agent/memory/`): reuses the same `REDIS_URL` and
+`ANTHROPIC_API_KEY` above — no new env vars. Facts about a user are stored under a
+`livekit-voice-skeleton:memory:{userId}` key with a 180-day sliding TTL (longer than
+sessions' 6h, since memory is meant to outlast any one session) and injected into the system
+prompt on their next session. Same `REDIS_URL`-unset-vs-unreachable behavior as session
+persistence above.
 
 **Fallback vendor** (STT/TTS failover, `agent/pipeline/failover.js`) — **not yet built**.
 OpenAI was considered and dropped; the fallback vendor for STT/TTS is TBD (LLM fallback stays

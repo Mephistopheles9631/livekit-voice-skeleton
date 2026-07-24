@@ -31,5 +31,18 @@ export function createClaudeLLM({
     return stream;
   }
 
-  return { generate };
+  // One-shot, non-streaming call — used for end-of-session memory extraction
+  // (agent/memory/memoryExtractor.js), not the turn-by-turn conversation. Reuses this same
+  // client/API key rather than instantiating a second Anthropic client.
+  async function summarize({ system, prompt, maxTokens = 300 }) {
+    const res = await client.messages.create({
+      model,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: "user", content: prompt }],
+    });
+    return res.content[0].text;
+  }
+
+  return { generate, summarize };
 }

@@ -113,6 +113,12 @@ on — do not proceed to Phase 1 until this works reliably.
 - ✅ **Done**: persist session state (Redis) instead of in-memory, so a
   session can survive a server restart — `server/sessionStore.js`,
   live-verified (see Phase log below)
+- ✅ **Done**: persistent conversational memory — the agent recalls facts
+  about a user across separate sessions, not just within one call. Also
+  fixed a real prerequisite gap found along the way: the agent previously
+  had **zero** conversation history even *within* a session (every turn
+  was a stateless single-message call to Claude) and **zero** system
+  prompt. See Phase log below for what was built and verified.
 - 🚧 Add a second STT/LLM/TTS vendor and real fallback logic (not just a
   config flag — actually detect vendor failure/latency and switch)
 - 🚧 Track and log cost-per-session-minute across vendors
@@ -361,3 +367,55 @@ just the final code.
   connections, the `@livekit/rtc-node` `Room`) can't be meaningfully
   persisted across a process restart and wasn't attempted; the agent just
   rejoins fresh, which is the existing (unchanged) behavior.
+
+- 2026-07-24: **Persistent conversational memory built.** Two real gaps
+  fixed as prerequisites, discovered while building this: `runTurn()` in
+  `agent/turnOrchestrator.js` previously sent a single bare user message
+  per Claude call with no prior turns — the agent couldn't recall
+  anything said 10 seconds earlier in the *same* session. And there was
+  no system prompt at all. Both fixed: `turnOrchestrator.js` now
+  accumulates `conversationHistory` (only for turns that actually
+  complete — a barge-in'd turn contributes nothing, matching how a
+  person naturally restarts a thought after interrupting themselves) and
+  sends it as prior context on every subsequent turn; `agentSession.js`
+  now sets a real system prompt.
+  Cross-session memory: `agent/memory/userMemoryStore.js` (Redis-backed,
+  same in-memory-fallback/fail-loud-if-misconfigured pattern as
+  `sessionStore.js`, 180-day sliding TTL — longer than session TTL since
+  memory is meant to last, not sessions), keyed by the user's real
+  LiveKit identity (`RemoteParticipant.identity`, recovered for free from
+  `RoomEvent.TrackSubscribed`'s existing 3rd argument — confirmed against
+  `node_modules/@livekit/rtc-node/dist/room.js`, no protocol changes
+  needed). At session end, `agent/memory/memoryExtractor.js` asks Claude
+  (via a new `summarize()` on `claudeAdapter.js`, reusing the same
+  client) to reduce the session's transcript into an updated, merged
+  bullet list of durable facts, replacing (not just appending to) the
+  previous summary.
+  **A real bug found and fixed during live verification, not glossed
+  over**: the first version of the extraction prompt ended right after
+  the raw `User: …\nAssistant: …` transcript lines with nothing after
+  them — against the real Anthropic API, Claude sometimes *continued*
+  the dialogue (inventing further turns that were never said) instead of
+  summarizing it, polluting the stored facts with fabricated content.
+  Reproduced against the real API, fixed by wrapping the transcript in
+  `<transcript>` tags and re-stating the task explicitly after it rather
+  than ending on the transcript's last line.
+  **Verified against the real Anthropic API and real Redis** (not just
+  read as "should work"): a simulated first session stated a name,
+  profession, and a pet's name — the extracted facts matched exactly,
+  no fabrication. A second, separate process (new "session") loaded only
+  the stored summary (no shared message history) and correctly answered
+  a recall question about both facts. A third session with a correction
+  ("Biscuit is actually a labrador, not a golden retriever; I switched
+  to Rust") correctly replaced the old facts rather than appending a
+  contradiction. 42/42 tests passing (7 new: 3 `userMemoryStore.test.js`
+  contract tests, 4 new `turnOrchestrator.test.js` tests for history
+  accumulation, barge-in exclusion, and per-turn `getSystem()` calls).
+  Restarted `livekit-voice-skeleton-agent.service`, 0 restarts, clean
+  Redis connect logged. **What this does NOT yet prove**: the full
+  voice-to-voice loop — actually speaking a fact aloud, ending the call,
+  starting a new one, and hearing it recalled through real STT/TTS. The
+  Anthropic-API-level test above exercises every line of new code except
+  the (unmodified) STT/TTS legs; the full loop still needs the user's
+  own live two-session test, same as every other "does it actually sound
+  right" claim in this project.

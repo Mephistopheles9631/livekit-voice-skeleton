@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { createInternalApi } from "./control/internalApi.js";
 import { createAgentSession } from "./agentSession.js";
+import { createUserMemoryStore } from "./memory/userMemoryStore.js";
 
 const env = process.env;
 const PORT = env.AGENT_PORT || 3012;
@@ -27,6 +28,7 @@ if (!env.ELEVENLABS_API_KEY) {
 }
 
 const sessions = new Map(); // roomName -> AgentSession
+const memoryStore = await createUserMemoryStore({ redisUrl: env.REDIS_URL });
 
 const server = createInternalApi({
   secret: SECRET,
@@ -36,6 +38,7 @@ const server = createInternalApi({
     const session = await createAgentSession({
       roomName,
       env,
+      memoryStore,
       onEnded: (name) => sessions.delete(name),
     });
     sessions.set(roomName, session);

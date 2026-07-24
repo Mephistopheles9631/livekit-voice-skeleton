@@ -13,13 +13,23 @@ import { createDeepgramSTT } from "./pipeline/stt/deepgramAdapter.js";
 import { createClaudeLLM } from "./pipeline/llm/claudeAdapter.js";
 import { createElevenLabsTTS } from "./pipeline/tts/elevenLabsAdapter.js";
 import { createTurnOrchestrator } from "./turnOrchestrator.js";
+import { extractMemory } from "./memory/memoryExtractor.js";
 
 const SAMPLE_RATE = 16000;
 
-export async function createAgentSession({ roomName, env, onEnded }) {
+// There is otherwise zero system prompt — Claude gets nothing but the raw user utterance.
+// Kept short and voice-specific (long, text-formatted answers read badly aloud through TTS).
+const BASE_SYSTEM_PROMPT =
+  "You are a helpful voice assistant talking with a user over a live audio call. Keep " +
+  "responses brief and conversational — they will be spoken aloud by a TTS engine, not read " +
+  "as text, so avoid lists, headings, or long multi-part answers.";
+
+export async function createAgentSession({ roomName, env, onEnded, memoryStore }) {
   const room = new Room();
   const turnState = createTurnState();
   const llm = createClaudeLLM({ apiKey: env.ANTHROPIC_API_KEY, model: env.CLAUDE_MODEL });
+  let userId = null;
+  let systemPrompt = BASE_SYSTEM_PROMPT;
   const tts = {
     connect: (opts) =>
       createElevenLabsTTS({
@@ -64,6 +74,7 @@ export async function createAgentSession({ roomName, env, onEnded }) {
     },
     broadcast,
     roomName,
+    getSystem: () => systemPrompt,
     onError: (err) => {
       console.error(`[agent:${roomName}] pipeline error`, err);
       // Surface to the client too — a pipeline failure (e.g. TTS auth/plan errors) used to
@@ -73,7 +84,17 @@ export async function createAgentSession({ roomName, env, onEnded }) {
     },
   });
 
-  async function handleAudioTrack(track) {
+  async function handleAudioTrack(track, participant) {
+    userId = participant.identity;
+    const memory = await memoryStore.get(userId).catch((err) => {
+      console.error(`[agent:${roomName}] memory lookup failed for ${userId}`, err);
+      return null;
+    });
+    if (memory?.facts) {
+      systemPrompt = `${BASE_SYSTEM_PROMPT}\n\nWhat you remember about this user from earlier conversations:\n${memory.facts}`;
+      console.log(`[agent:${roomName}] loaded prior memory for ${userId}`);
+    }
+
     stt = await createDeepgramSTT({
       apiKey: env.DEEPGRAM_API_KEY,
       model: env.DEEPGRAM_MODEL,
@@ -89,9 +110,9 @@ export async function createAgentSession({ roomName, env, onEnded }) {
     }
   }
 
-  room.on(RoomEvent.TrackSubscribed, (track) => {
+  room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
     if (track.kind === TrackKind.KIND_AUDIO) {
-      handleAudioTrack(track).catch((err) =>
+      handleAudioTrack(track, participant).catch((err) =>
         console.error(`[agent:${roomName}] audio bridge error`, err)
       );
     }
@@ -108,11 +129,27 @@ export async function createAgentSession({ roomName, env, onEnded }) {
   turnState.transition(STATES.LISTENING);
   console.log(`[agent:${roomName}] joined, listening`);
 
+  async function saveMemory() {
+    const history = orchestrator.getHistory();
+    if (!userId || history.length === 0) return; // nothing was actually said, nothing to save
+    try {
+      const previous = await memoryStore.get(userId);
+      const facts = await extractMemory({ llm, history, previousFacts: previous?.facts });
+      await memoryStore.set(userId, { facts, updatedAt: Date.now() });
+      console.log(`[agent:${roomName}] saved memory for ${userId}`);
+    } catch (err) {
+      // Never let a memory-save failure block session teardown — losing this session's
+      // memory update is far better than a stuck/crashed leave().
+      console.error(`[agent:${roomName}] memory save failed for ${userId}`, err);
+    }
+  }
+
   async function leave() {
     orchestrator.abortActive();
     stt?.stop();
     await audioPublisher?.close();
     await room.disconnect();
+    await saveMemory();
     onEnded?.(roomName);
   }
 

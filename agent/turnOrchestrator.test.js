@@ -11,9 +11,12 @@ import { createTurnState, STATES } from "./state/turnState.js";
 
 function createFakeLLM() {
   const streams = [];
+  const calls = [];
   return {
     streams,
-    generate({ onToken }) {
+    calls,
+    generate({ messages, system, onToken }) {
+      calls.push({ messages, system });
       let resolveFinal, rejectFinal;
       const finalPromise = new Promise((resolve, reject) => {
         resolveFinal = resolve;
@@ -94,7 +97,7 @@ function createRecordingBroadcast() {
   return fn;
 }
 
-function setup(initialState = STATES.LISTENING) {
+function setup(initialState = STATES.LISTENING, { getSystem } = {}) {
   const turnState = createTurnState(initialState);
   const llm = createFakeLLM();
   const tts = createFakeTTS();
@@ -107,6 +110,7 @@ function setup(initialState = STATES.LISTENING) {
     audioPublisher,
     broadcast,
     roomName: "test-room",
+    ...(getSystem ? { getSystem } : {}),
   });
   return { turnState, llm, tts, audioPublisher, broadcast, orchestrator };
 }
@@ -261,4 +265,54 @@ test("every transcript, interim or final, is broadcast on the transcript topic",
   const transcriptEvents = broadcast.events.filter((e) => e.topic === "transcript");
   assert.equal(transcriptEvents.length, 1);
   assert.equal(transcriptEvents[0].payload.text, "partial");
+});
+
+test("a completed turn is added to history and sent as prior context on the next turn", async () => {
+  const { llm, orchestrator } = setup();
+
+  const first = orchestrator.handleTranscript({ text: "my name is Alex", isFinal: true, speechFinal: true });
+  assert.deepEqual(llm.calls[0].messages, [{ role: "user", content: "my name is Alex" }]);
+  llm.streams[0].emitToken("Nice to meet you, Alex.");
+  llm.streams[0].resolve();
+  await first;
+
+  assert.deepEqual(orchestrator.getHistory(), [
+    { role: "user", content: "my name is Alex" },
+    { role: "assistant", content: "Nice to meet you, Alex." },
+  ]);
+
+  const second = orchestrator.handleTranscript({ text: "what is my name?", isFinal: true, speechFinal: true });
+  assert.deepEqual(llm.calls[1].messages, [
+    { role: "user", content: "my name is Alex" },
+    { role: "assistant", content: "Nice to meet you, Alex." },
+    { role: "user", content: "what is my name?" },
+  ]);
+  llm.streams[1].resolve();
+  await second;
+});
+
+test("a barge-in'd turn contributes nothing to history", async () => {
+  const { orchestrator } = setup();
+
+  const first = orchestrator.handleTranscript({ text: "tell me a long story", isFinal: true, speechFinal: true });
+  orchestrator.handleTranscript({ text: "wait", isFinal: false, speechFinal: false }); // barge-in
+  await first;
+
+  assert.deepEqual(orchestrator.getHistory(), [], "an aborted turn must not be remembered");
+});
+
+test("getSystem() is called fresh per turn, not snapshotted once at construction", async () => {
+  let systemPrompt = "first prompt";
+  const { llm, orchestrator } = setup(STATES.LISTENING, { getSystem: () => systemPrompt });
+
+  const first = orchestrator.handleTranscript({ text: "hi", isFinal: true, speechFinal: true });
+  assert.equal(llm.calls[0].system, "first prompt");
+  llm.streams[0].resolve();
+  await first;
+
+  systemPrompt = "second prompt";
+  const second = orchestrator.handleTranscript({ text: "hi again", isFinal: true, speechFinal: true });
+  assert.equal(llm.calls[1].system, "second prompt");
+  llm.streams[1].resolve();
+  await second;
 });

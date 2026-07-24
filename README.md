@@ -22,7 +22,10 @@ the code "should" do.
   participant and runs the actual voice AI pipeline —
   - **STT**: streams the human's audio to Deepgram, live interim/final
     transcripts.
-  - **LLM**: feeds finished utterances to Claude, streaming the response.
+  - **LLM**: feeds finished utterances to Claude, streaming the response,
+    with real multi-turn conversation history within a session and a
+    real system prompt (see Conversational memory below — both were
+    missing until Phase 5).
   - **Barge-in**: a new transcript arriving while the agent is thinking or
     speaking aborts the in-flight LLM/TTS and clears any queued audio —
     genuinely live-triggerable, not simulated.
@@ -82,6 +85,23 @@ abandoned ones self-clean in Redis rather than accumulating forever. Note the sc
 covers the token server's bookkeeping only — the separate `agent` process's live pipeline
 state (open STT/TTS connections, the LiveKit `Room` object) can't meaningfully survive a
 process restart and isn't attempted here; the agent just rejoins fresh.
+
+**Conversational memory** (`agent/turnOrchestrator.js`, `agent/memory/`): the agent recalls
+facts about a user across separate sessions, not just within one call — and, as a prerequisite
+fix, now actually has memory *within* a session too (previously every turn was a stateless
+single-message call to Claude with no history and no system prompt at all). At session end,
+`agent/memory/memoryExtractor.js` asks Claude to reduce the session's transcript into an
+updated, merged bullet-list of durable facts (corrections replace old facts, not append to
+them), stored in Redis (`agent/memory/userMemoryStore.js`, 180-day sliding TTL) keyed by the
+user's real LiveKit identity — recovered for free from `RoomEvent.TrackSubscribed`, no protocol
+changes needed. Next session, the stored facts are injected into the system prompt before the
+first turn. **A real bug found and fixed during verification**: the first version of the
+extraction prompt let Claude *continue* the transcript instead of summarizing it, inventing
+facts that were never said — fixed by clearly wrapping the transcript as quoted data. Verified
+against the real Anthropic API and real Redis (a simulated session's facts were recalled
+exactly, and a correction in a later session replaced rather than duplicated the old fact);
+the full voice-to-voice loop (say a fact, end the call, start a new one, hear it recalled) is
+the one piece that still needs a live human test, same as this project's other audio claims.
 
 ## What's left (Phase 5)
 
