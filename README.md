@@ -119,13 +119,15 @@ exactly, and a correction in a later session replaced rather than duplicated the
 the full voice-to-voice loop (say a fact, end the call, start a new one, hear it recalled) is
 the one piece that still needs a live human test, same as this project's other audio claims.
 
-## SugarShan POC
+## Production-Readiness Validation
 
-`loadtest/` — a client-requested proof-of-concept answering three specific questions with real
-evidence, not more claims. Full dated numbers, the real ElevenLabs concurrency-cap finding, and
+`loadtest/` — real evidence, not more claims, for three questions phase-by-phase feature work
+alone doesn't answer: how does the pipeline actually behave under concurrent load, does
+cross-session memory really survive a process restart, and does a warm-pool strategy actually
+help with cold-start latency. Full dated numbers, a real vendor concurrency-cap finding, and
 two real bugs the load test itself surfaced and fixed (one in the test harness, one in
 `agent/turnOrchestrator.js` itself, now regression-tested) are logged in `PROJECT_SPEC.md`'s
-SugarShan POC section.
+Production-Readiness Validation section.
 
 - **Load/latency harness** — N simulated sessions joined headlessly via `@livekit/rtc-node`
   against the real running services (not mocked), publishing real synthesized speech and
@@ -191,7 +193,8 @@ against real ambient noise, whether a barge-in sounds clean, whether the
 real vendor SDKs' behavior matches what these tests mock, or real latency
 numbers. Those are the live-verified claims logged with dates in
 `PROJECT_SPEC.md` — CI passing means the orchestration logic is correct
-against documented vendor contracts, not that the voice AI works. The SugarShan POC's load
-test and memory-verification runs (above) are exactly this category: live-only by design,
-run against the real hosted services, with real numbers logged in `PROJECT_SPEC.md` rather
-than asserted in a test file. See `TESTING.md` for the full automated-vs-manual breakdown.
+against documented vendor contracts, not that the voice AI works. The Production-Readiness
+Validation load test and memory-verification runs (above) are exactly this category:
+live-only by design, run against the real hosted services, with real numbers logged in
+`PROJECT_SPEC.md` rather than asserted in a test file. See `TESTING.md` for the full
+automated-vs-manual breakdown.

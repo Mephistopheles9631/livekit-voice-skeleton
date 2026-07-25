@@ -58,9 +58,9 @@ pipeline's many-small-chunk streaming pattern.
   human speaking a fact aloud, ending the call, starting a new one, and hearing it recalled
   through real STT/TTS. That needs a live human test, same as every other audio-quality claim
   here.
-- SugarShan POC Part 1's real load numbers (`loadtest/runLoadTest.js` against the live
-  services) and Part 2's cross-session memory proof across a real agent-process restart
-  (`loadtest/verifyMemory.js`) — both vendor/LiveKit/Redis-touching and live-only by design,
-  same reasoning as the rest of this section. Real, dated results in `PROJECT_SPEC.md`'s
-  SugarShan POC section; see `loadtest/README.md` for exactly what each script measures and
-  its honesty labels/known limitations.
+- Production-Readiness Validation's Part 1 real load numbers (`loadtest/runLoadTest.js`
+  against the live services) and Part 2's cross-session memory proof across a real
+  agent-process restart (`loadtest/verifyMemory.js`) — both vendor/LiveKit/Redis-touching and
+  live-only by design, same reasoning as the rest of this section. Real, dated results in
+  `PROJECT_SPEC.md`'s Production-Readiness Validation section; see `loadtest/README.md` for
+  exactly what each script measures and its honesty labels/known limitations.

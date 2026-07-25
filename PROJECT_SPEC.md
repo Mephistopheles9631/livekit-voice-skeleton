@@ -4,8 +4,8 @@
 
 This project exists to build real, demonstrable experience in real-time
 voice AI engineering — WebRTC-based voice pipelines, turn-taking, session
-orchestration — the specific domain required by roles like the SugarShan
-"Real-Time Voice & Video Streaming Engineer" posting. That role required
+orchestration — the specific domain required by "Real-Time Voice & Video
+Streaming Engineer"-type roles. Postings in that space typically require
 production experience with:
 
 - Real-time voice AI / conversational agents (turn-taking, barge-in,
@@ -35,11 +35,11 @@ story) — silent TTS failure on a free-plan voice restriction, an audio
 concurrency race that caused static, and a native-SDK serialization gotcha
 that caused 10x-speed playback. `README.md` has the short version;
 `TESTING.md` documents what's covered by automated tests vs. what only a
-live human check can confirm. **A client-requested POC (SugarShan) is also
-done** — real 10-concurrent-session load/latency numbers, a scripted
+live human check can confirm. **A production-readiness validation pass is
+also done** — real 10-concurrent-session load/latency numbers, a scripted
 cross-session-memory proof across a real process restart, and a labeled
-GPU-warm-pool simulation; see the **SugarShan POC** section further down
-and `loadtest/README.md`.
+GPU-warm-pool simulation; see the **Production-Readiness Validation**
+section further down and `loadtest/README.md`.
 
 ### Original Phase 0 snapshot (as of 2026-07-23, kept for history)
 
@@ -460,13 +460,14 @@ just the final code.
   including the real voice-to-voice loop this project's honesty
   checkpoint requires before calling a phase done.
 
-## SugarShan POC
+## Production-Readiness Validation
 
-Kept as its own section, separate from the Phase 0-5 skill-building log above: this work was
-requested directly by Shany Ashkenazy (Founder/CEO, Sugar Holdings LLC) ahead of a Monday call,
-scoped in `SCOPE_OF_WORK_sugarshan_poc.md`, and is a client deliverable rather than another
-roadmap phase. Code lives in `loadtest/` — see `loadtest/README.md` for what each script does
-and how to run it.
+Kept as its own section, separate from the Phase 0-5 skill-building log above: this closes
+three real gaps that phase-by-phase feature-building alone doesn't answer — no load/latency
+data existed under real concurrency, cross-session memory had never been proven across an
+actual process restart in a repeatable way, and the GPU warm-pool/pre-warming idea for
+avatar-style cold-start latency existed only as a proposal. Code lives in `loadtest/` — see
+`loadtest/README.md` for what each script does and how to run it.
 
 - 2026-07-24: **Part 1, load/latency harness built and run for real** against the live
   `livekit-voice-skeleton`/`-agent` services and real Deepgram/Anthropic/ElevenLabs APIs — not
